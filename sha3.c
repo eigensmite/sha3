@@ -5,6 +5,12 @@
 #include <gmp.h>
 #include <math.h>
 #include <string.h>
+#include <assert.h>
+
+typedef struct SHA_3 {
+    size_t r;
+    size_t d;
+} SHA_3;
 
 void print_lanes(uint64_t A[5][5]) {
     printf("Xor'd state (as lanes of integers)\n");
@@ -228,7 +234,115 @@ static inline void keccak_p(mpz_t out, const mpz_t in, const size_t b, const siz
 
 static inline void keccak_f(mpz_t out, const mpz_t in) {keccak_p(out, in, 1600, 24);}
 
-static void sponge(mpz_t out, const mpz_t in, pad_fn pad, perm_fn perm, size_t r, size_t d) {
+
+
+
+static inline void keccak_p_uint64(uint64_t state[25], const size_t b, const size_t n_r) {
+    switch (b) {
+        case 1600: case 800: case 400: case 200: case 100: case 50: case 25: break;
+        default: 
+            printf("keccak_p requires bit width b of size { 1600, 800, 400, 200, 100, 50, 25 }; you have b=%lu\n", b);
+            return;
+    }
+
+    const size_t w = b/25;
+    const size_t l = (size_t) log2(w);
+
+    uint64_t A[5][5] = {{0}};
+
+    for (int y = 0; y < 5; y++) {
+        for (int x = 0; x < 5; x++) {
+            if(w==64) A[x][y] = state[5*y + x];
+            else A[x][y] = (state[w*(5*y+x)/64] >> ((w*(5*y+x))%64)) & ((1ULL << w) - 1);
+        }
+    }
+
+    //print_state(A);
+
+    for(int i = 12+2*l-n_r; i < 12+2*l; i++) {
+        _theta(A, w);          // 𝜃
+          _rho(A, w);         // 𝜌
+           _pi(A);           // 𝜋
+          _chi(A);          // 𝜒
+        _iota(A, i, l, w); // 𝜄
+    }
+
+    for(int i = 0; i < (25 + 64/w - 1)*w/64; i+=1) {
+        if(w==64) state[i] = A[i%5][i/5];
+        else {
+            for (int j = 1; j <= 64/w; j++) {
+                state[i] <<= w;
+                if((64/w-j+64/w*i)/(5) != 5) state[i] += A[(64/w-j+64/w*i)%5][(64/w-j+64/w*i)/(5)];
+            }
+        }
+    }
+}
+
+static inline void keccak_f_uint64(uint64_t state[25]) {
+    keccak_p_uint64(state, 1600, 24);
+}
+
+// r is always in bits
+static void sponge_absorb_bytes(uint64_t state[25], uint8_t buffer[4096], size_t *preloaded_bytes, const size_t buffer_len, const struct SHA_3 sha){
+    const size_t r = sha.r;
+    if(r%8 != 0) {
+        printf("r must be divisible by 8 because we are reversing endienness of bytes\n");
+        assert(r%8 == 0);
+    }
+
+    //printf("%ld\n", buffer_len);
+
+    uint8_t *buffer_start = buffer;
+
+    size_t bytes_remain = buffer_len - (buffer - buffer_start);
+
+    while (bytes_remain + *preloaded_bytes >= r/8) {
+        for (int i = *preloaded_bytes; i < r/8; i++) {
+            state[i/8] ^= ((uint64_t) buffer[0]) << (8*(i%8));
+            buffer++;
+        }
+        keccak_f_uint64(state);
+        *preloaded_bytes = 0;
+
+        bytes_remain = buffer_len - (buffer - buffer_start);
+    }
+
+    for (int i = *preloaded_bytes; i < bytes_remain; i++) {
+        state[i/8] ^= ((uint64_t) buffer[0]) << (8*(i%8));
+        buffer++;
+    } 
+    *preloaded_bytes = (bytes_remain + *preloaded_bytes) % (r/8);
+}
+
+
+static void sponge_squeeze_hash(uint8_t *hash, uint64_t state[25], size_t *preloaded_bytes, const struct SHA_3 sha) {
+    const size_t r = sha.r, d = sha.d;
+
+    size_t len_pad = ((r - (4 + 8*(*preloaded_bytes)) % r) % r + 4)/8;
+    state[(*preloaded_bytes)/8] ^= ((uint64_t) 0x06) << (8*((*preloaded_bytes)%8));
+    state[((*preloaded_bytes)+len_pad-1)/8] ^= ((uint64_t) 0x80) << (8*(((*preloaded_bytes)+len_pad-1)%8));
+    keccak_f_uint64(state);
+    *preloaded_bytes = 0;
+
+    size_t len_out = 0;
+    do {
+        for (int i = 0; i < r/8; i++) {
+            hash[i] = (char) ((state[i/8] >> 8*(i%8)) & 0xff);
+
+            if(8*i >= d) return;
+        }
+        len_out += r;
+        if (len_out < d) keccak_p_uint64(state, 1600, 24);
+    } while (len_out < d);
+}
+
+
+
+
+
+
+static void sponge(mpz_t out, const mpz_t in, pad_fn pad, perm_fn perm, size_t r, size_t d) 
+{
     mpz_t P, Pr, S, Sr;
     mpz_inits(P, Pr, S, Sr, NULL);
     
@@ -281,13 +395,15 @@ static void sponge(mpz_t out, const mpz_t in, pad_fn pad, perm_fn perm, size_t r
     mpz_clears(P, Pr, S, Sr, NULL);
 }
 
-void sha3_224(mpz_t out, const mpz_t in) {sponge(out, in, pad10star1, keccak_f, 1152, 224);}
 
-void sha3_256(mpz_t out, const mpz_t in) {sponge(out, in, pad10star1, keccak_f, 1088, 256);}
 
-void sha3_384(mpz_t out, const mpz_t in) {sponge(out, in, pad10star1, keccak_f, 832, 384);}
+// void sha3_224(mpz_t out, const mpz_t in) {sponge(out, in, pad10star1, keccak_f, 1152, 224);}
 
-void sha3_512(mpz_t out, const mpz_t in) {sponge(out, in, pad10star1, keccak_f, 576, 512);}
+// void sha3_256(mpz_t out, const mpz_t in) {sponge(out, in, pad10star1, keccak_f, 1088, 256);}
+
+// void sha3_384(mpz_t out, const mpz_t in) {sponge(out, in, pad10star1, keccak_f, 832, 384);}
+
+// void sha3_512(mpz_t out, const mpz_t in) {sponge(out, in, pad10star1, keccak_f, 576, 512);}
 
 
 static void parameters(int* index, int* length, char *filename, int argc, char** argv) {
@@ -308,11 +424,14 @@ static void parameters(int* index, int* length, char *filename, int argc, char**
     }
 }
 
-int main (int argc, char **argv) {
 
-    // time_t start_time = time(NULL);
-    // time_t build_bitstream_time;
-    // time_t sha3_time;
+
+const struct SHA_3 SHA3_224 = {.r=1152,.d=224};
+const struct SHA_3 SHA3_256 = {.r=1088,.d=256};
+const struct SHA_3 SHA3_384 = {.r=832, .d=384};
+const struct SHA_3 SHA3_512 = {.r=576, .d=512};
+
+int main (int argc, char **argv) {
 
     int bits = 256;
     char filename[256] = {0};
@@ -321,18 +440,18 @@ int main (int argc, char **argv) {
         parameters(&i, &bits, filename, argc, argv);
     }
 
-    mpz_t out;
-    mpz_init(out);
+    struct SHA_3 sha;
+    switch (bits) {
+        case 224: sha = SHA3_224; break;
+        case 256: sha = SHA3_256; break;
+        case 384: sha = SHA3_384; break;
+        case 512: sha = SHA3_512; break;
+        default: exit(1);
+    }
 
-    mpz_t value; 
-    mpz_init(value);
 
-    unsigned char buffer[200];
+    uint8_t buffer[4096];
     size_t bytesRead;
-    size_t totalBytes = 0;
-
-    mpz_t chunk;
-    mpz_init(chunk);
 
     FILE *f;
     if (filename[0] == 0) { f = stdin; }
@@ -340,78 +459,22 @@ int main (int argc, char **argv) {
         f = fopen(filename, "rb");
     }
 
+    uint64_t state[25] = {0};
+    size_t preloaded_bytes = 0;
+
     while ((bytesRead = fread(buffer, 1, sizeof(buffer), f)) > 0) {
-        mpz_set_ui(chunk, 0);
 
-        // Import chunk in little-endian
-        mpz_import(chunk, bytesRead, -1, 1, 0, 0, buffer);
+        sponge_absorb_bytes(state, buffer, &preloaded_bytes, bytesRead, sha);
 
-        // Shift the chunk left by totalBytes*8 so it is positioned correctly
-        mpz_mul_2exp(chunk, chunk, totalBytes * 8);
-
-        // Add chunk to the total number
-        mpz_add(value, value, chunk);
-
-        // Update total bytes read so far
-        totalBytes += bytesRead;
     }
-    mpz_clear(chunk);
-    
+    //printf("preloaded %ld\n", preloaded_bytes);
+    //sponge_absorb_bytes(state, buffer, &preloaded_bytes, 0, r, 1);
 
+    uint8_t hash[512];
+    sponge_squeeze_hash(hash, state, &preloaded_bytes, sha);
 
-    //mpz_import(value, strlen(str), -1, sizeof(char), 1, 0, str);
-    mpz_setbit(value, totalBytes * 8); // need sentinel bit for padding func to know when to start
-
-    if (bits == 224) {
-    unsigned char buffer_224[224/8];
-    sha3_224(out, value);
-    mpz_export(buffer_224, NULL, -1, 1, -1, 0, out);
-    for(int i = 0; i < 224/8; i++) {
-        printf("%02x", buffer_224[i]);
-    }
+    for (int i = 0; i < sha.d/8; i++) printf("%02x", hash[i]);
     printf("\n");
-} else if (bits == 256) {
-
-    unsigned char buffer_256[256/8];
-    sha3_256(out, value);
-    mpz_export(buffer_256, NULL, -1, 1, -1, 0, out);
-    for(int i = 0; i < 256/8; i++) {
-        printf("%02x", buffer_256[i]);
-    }
-    printf("\n");
-} else if (bits == 384) {
-
-    unsigned char buffer_384[384/8];
-    sha3_384(out, value);
-    mpz_export(buffer_384, NULL, -1, 1, -1, 0, out);
-    for(int i = 0; i < 384/8; i++) {
-        printf("%02x", buffer_384[i]);
-    }
-    printf("\n");
-
-} else if (bits == 512) {
-    unsigned char buffer_512[512/8];
-    sha3_512(out, value);
-    mpz_export(buffer_512, NULL, -1, 1, -1, 0, out);
-    for(int i = 0; i < 512/8; i++) {
-        printf("%02x", buffer_512[i]);
-    }
-    printf("\n");
-} else printf("uhhh what happened");
-
-
-
-
-
-
-    mpz_clear(value);
-
-
-    // sha3_384(out, in);
-    // gmp_printf("%ZX\n", out);
-    // sha3_512(out, in);
-    // gmp_printf("%ZX\n", out);
-
-
+    //exit(1);
     
 }
