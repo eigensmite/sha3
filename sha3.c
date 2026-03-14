@@ -38,100 +38,6 @@ void print_state(uint64_t A[5][5]) {
 typedef size_t(*pad_fn)(mpz_t, const mpz_t, const size_t);
 typedef void(*perm_fn)(mpz_t, const mpz_t);
 
-size_t pad10star1(mpz_t out, const mpz_t in, const size_t r) {
-    
-    size_t len_in = mpz_sizeinbase(in, 2) - 1;
-
-    mpz_fdiv_r_2exp(out, in, len_in); // copy in to out
-
-
-    // printf("in size %ld\n", len_in);
-    // gmp_printf("in  %Zx\n", in);
-    // gmp_printf("out %Zx\n", out);
-
-    // calculate length of 10*1 pad
-    // yield x = -(4 + len_in) (mod r), 0 <= x < r
-    size_t len_pad = (r - (4 + len_in) % r) % r + 4;
-
-    mpz_t pad;
-    mpz_init(pad);  // init pad
-
-    mpz_set_ui(pad, 1);                   // pad = 1;
-    mpz_mul_2exp(pad, pad, len_pad - 1); // pad <<= len_pad-1;
-    mpz_add_ui(pad, pad, 6);            // pad += 6;
-    mpz_mul_2exp(pad, pad, len_in);    // pad <<= len_in
-    mpz_add(out, out, pad);           // out += pad;
-    
-    mpz_clear(pad); // clear pad
-
-    size_t len_out = len_pad + len_in;
-
-    return len_out;
-}
-
-// // natural order endian version
-// size_t pad10star1(mpz_t out, const mpz_t in, const size_t r) {
-    
-//     size_t len_in = mpz_sizeinbase(in, 2) - 1;
-
-//     mpz_fdiv_r_2exp(out, in, len_in); // copy in to out
-
-
-//     printf("in size %ld\n", len_in);
-//     gmp_printf("in  %Zx\n", in);
-//     gmp_printf("out %Zx\n", out);
-
-//     // calculate length of 10*1 pad
-//     // yield x = -(4 + len_in) (mod r), 0 <= x < r
-//     size_t len_pad = (r - (4 + len_in) % r) % r + 4;
-
-//     mpz_t pad;
-//     mpz_init(pad);  // init pad
-
-//     // mpz_set_ui(pad, 1);                   // pad = 1;
-//     // mpz_mul_2exp(pad, pad, len_pad - 1); // pad <<= len_pad-1;
-//     // mpz_add_ui(pad, pad, 6);            // pad += 6;
-//     // mpz_mul_2exp(pad, pad, len_in);    // pad <<= len_in
-//     // mpz_add(out, out, pad);           // out += pad;
-
-
-//     mpz_mul_2exp(out, out, 4);
-//     mpz_add_ui(out, out, 6);
-//     mpz_mul_2exp(out, out, len_pad - 4);
-//     mpz_add_ui(out, out, 1);
-    
-    
-//     mpz_clear(pad); // clear pad
-
-//     size_t len_out = len_pad + len_in;
-
-//     return len_out;
-// }
-
-
-// uint8_t get_bit(uint64_t A[5][5], const int x, const int y, const int z) {
-//     return (A[x][y] >> z) & 1;
-// }
-
-// void set_bit(uint64_t A[5][5], const int x, const int y, const int z, const _Bool b) {
-//     A[x][y] &= ~((uint64_t)1 << z);
-//     A[x][y] |= ((uint64_t)b << z);
-// }
-
-// static inline _Bool _theta_C(uint64_t A[5][5], const int x, const int z) {
-//     return get_bit(A, x, 0, z) ^ 
-//            get_bit(A, x, 1, z) ^ 
-//            get_bit(A, x, 2, z) ^ 
-//            get_bit(A, x, 3, z) ^ 
-//            get_bit(A, x, 4, z) ; 
-// }
-
-// uint8_t _theta_D(uint64_t *C, const int x, const int z, const size_t w) {
-//     //return (C[(x-1) % 5] >> z) ^ (C[(x+1) % 5] >> ((z-1) % w));
-//     // return 1 & (((C[(x+4) % 5] >> z) & 1) ^ ((C[(x+1) % 5] >> ((z+w-1) % w)) & 1));
-//     return ((C[(x+4) % 5] >> z) ^ (C[(x+1) % 5] >> ((z+w-1) % w))) & 1;
-// }
-
 
 const static int OFFSET_TABLE[5][5] = {
     {   0,  36,   3, 105, 210 },
@@ -189,55 +95,7 @@ static inline void _iota(uint64_t A[5][5], const int i, const int l, const size_
     A[0][0] ^= RC;
 }
 
-
-static inline void keccak_p(mpz_t out, const mpz_t in, const size_t b, const size_t n_r) {
-
-    switch (b) {
-        case 1600: case 800: case 400: case 200: case 100: case 50: case 25: break;
-        default: 
-            printf("keccak_p requires bit width b of size { 1600, 800, 400, 200, 100, 50, 25 }; you have b=%lu\n", b);
-            return;
-    }
-
-    const size_t w = b/25;
-    const size_t l = (size_t) log2(w); // cast to size_t safe because w is always a power of 2 (enforced by switch above)
-
-    uint64_t A[5][5] = {{0}};
-
-    mpz_t tmp;
-    mpz_init(tmp);
-    for(int x = 0; x < 5; x++) {
-        for(int y = 0; y < 5; y++) {
-            mpz_tdiv_q_2exp(tmp, in, w*(5*y + x));         // align desired bits to lowest 64               
-            A[x][y] = mpz_get_ui(tmp);                     // load lanes
-            if(w < 64) A[x][y] &= ((1ULL << w) - 1);       // mask for <64 lane length
-        }
-    }
-    mpz_clear(tmp);
-
-    for(int i = 12+2*l-n_r; i < 12+2*l; i++) {
-        _theta(A, w);          // 𝜃
-          _rho(A, w);         // 𝜌
-           _pi(A);           // 𝜋
-          _chi(A);          // 𝜒
-        _iota(A, i, l, w); // 𝜄
-    }
-
-    mpz_set_ui(out, 0);
-    for (int y = 4; y >= 0; y--) {
-        for (int x = 4; x >= 0; x--) {
-            mpz_mul_2exp(out, out, w);
-            mpz_add_ui(out, out, A[x][y]);
-        }
-    }
-}
-
-static inline void keccak_f(mpz_t out, const mpz_t in) {keccak_p(out, in, 1600, 24);}
-
-
-
-
-static inline void keccak_p_uint64(uint64_t state[25], const size_t b, const size_t n_r) {
+static inline void keccak_p(uint64_t state[25], const size_t b, const size_t n_r) {
     switch (b) {
         case 1600: case 800: case 400: case 200: case 100: case 50: case 25: break;
         default: 
@@ -278,8 +136,8 @@ static inline void keccak_p_uint64(uint64_t state[25], const size_t b, const siz
     }
 }
 
-static inline void keccak_f_uint64(uint64_t state[25]) {
-    keccak_p_uint64(state, 1600, 24);
+static inline void keccak_f(uint64_t state[25]) {
+    keccak_p(state, 1600, 24);
 }
 
 // r is always in bits
@@ -301,7 +159,7 @@ static void sponge_absorb_bytes(uint64_t state[25], uint8_t buffer[4096], size_t
             state[i/8] ^= ((uint64_t) buffer[0]) << (8*(i%8));
             buffer++;
         }
-        keccak_f_uint64(state);
+        keccak_f(state);
         *preloaded_bytes = 0;
 
         bytes_remain = buffer_len - (buffer - buffer_start);
@@ -321,89 +179,12 @@ static void sponge_squeeze_hash(uint8_t *hash, uint64_t state[25], size_t *prelo
     size_t len_pad = ((r - (4 + 8*(*preloaded_bytes)) % r) % r + 4)/8;
     state[(*preloaded_bytes)/8] ^= ((uint64_t) 0x06) << (8*((*preloaded_bytes)%8));
     state[((*preloaded_bytes)+len_pad-1)/8] ^= ((uint64_t) 0x80) << (8*(((*preloaded_bytes)+len_pad-1)%8));
-    keccak_f_uint64(state);
+    keccak_f(state);
     *preloaded_bytes = 0;
 
-    size_t len_out = 0;
-    do {
-        for (int i = 0; i < r/8; i++) {
-            hash[i] = (char) ((state[i/8] >> 8*(i%8)) & 0xff);
+    memcpy(hash, state, sha.d/8);
 
-            if(8*i >= d) return;
-        }
-        len_out += r;
-        if (len_out < d) keccak_p_uint64(state, 1600, 24);
-    } while (len_out < d);
 }
-
-
-
-
-
-
-static void sponge(mpz_t out, const mpz_t in, pad_fn pad, perm_fn perm, size_t r, size_t d) 
-{
-    mpz_t P, Pr, S, Sr;
-    mpz_inits(P, Pr, S, Sr, NULL);
-    
-    // const size_t b can be commented out due to 0 bit 
-    // padding being trivial/leading bits
-    // size of b is determined by perm function exclusively
-    // const size_t b = 1600;
-
-    size_t p_len = pad(P, in, r); // pad input N
-
-    // find number of r-bit pieces
-    // P_0, P_1, ... , P_{n-1}.
-    if (p_len % r != 0) {
-        printf("Padding function didn't yield P of num bits divisible by r\n");
-        exit(1);
-    } 
-    size_t n = p_len /= r; // get num of pieces
-
-    // absorb all pieces into sponge
-    for(size_t i = 0; i < n; i++) {
-
-        // extract i-th piece
-        mpz_fdiv_q_2exp(Pr, P, r*i); // shift right r*i bits
-        mpz_fdiv_r_2exp(Pr, Pr, r);   // take r bits
-
-        // extension by c = b - r bits is automatic
-        // leading 0 bits are incipient in mpz_t
-
-        mpz_xor(S, S, Pr); // XOR state with (trivially) extended P
-
-        perm(S, S); // apply b-bit block permutation, yielding S_{i+1}
-    }
-    //exit(1);
-   
-    size_t len_out = 0;
-    do {
-        // extract first r bits from S
-        mpz_fdiv_r_2exp(Sr, S, r); // take r bits
-
-        // append those bits to Z
-        mpz_mul_2exp(out, out, r);
-        mpz_ior(out, out, Sr);
-        len_out += r;
-
-        if (len_out < d) perm(S, S);
-    } while (len_out < d);
-
-    mpz_fdiv_r_2exp(out, out, d); // truncate to d bits  
-    
-    mpz_clears(P, Pr, S, Sr, NULL);
-}
-
-
-
-// void sha3_224(mpz_t out, const mpz_t in) {sponge(out, in, pad10star1, keccak_f, 1152, 224);}
-
-// void sha3_256(mpz_t out, const mpz_t in) {sponge(out, in, pad10star1, keccak_f, 1088, 256);}
-
-// void sha3_384(mpz_t out, const mpz_t in) {sponge(out, in, pad10star1, keccak_f, 832, 384);}
-
-// void sha3_512(mpz_t out, const mpz_t in) {sponge(out, in, pad10star1, keccak_f, 576, 512);}
 
 
 static void parameters(int* index, int* length, char *filename, int argc, char** argv) {
@@ -423,8 +204,6 @@ static void parameters(int* index, int* length, char *filename, int argc, char**
         }
     }
 }
-
-
 
 const struct SHA_3 SHA3_224 = {.r=1152,.d=224};
 const struct SHA_3 SHA3_256 = {.r=1088,.d=256};
