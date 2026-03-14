@@ -1,3 +1,4 @@
+
 /******************************************************************************
  * sha3.c
  *
@@ -5,6 +6,15 @@
  *
  * Author: eigensmite
  * Date: 2026-03-14
+ * 
+ * Provides:
+ *   - sponge_ctx: internal state and buffer for the sponge
+ *   - SHA_3: SHA-3 parameter sets (rate and output length)
+ *   - Predefined SHA3-224, SHA3-256, SHA3-384, SHA3-512 parameter sets
+ *   - Functions for initialization, absorption, padding, and squeezing
+ *
+ * Reference:
+ *   - FIPS 202: SHA-3 Standard (Keccak)
  *****************************************************************************/
 
 #include "sha3.h"
