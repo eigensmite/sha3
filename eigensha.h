@@ -27,7 +27,6 @@ void eigensha_finalize(eigensha_ctx *s) ;
 
 void eigensha_extract(uint8_t *hash, eigensha_ctx *s);
 
-
 #define sha_init(ctx) _Generic((ctx), \
     sha1_ctx*: sha1_init, \
     sha224_ctx*: sha224_init, \

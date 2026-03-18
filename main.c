@@ -43,6 +43,8 @@ static void parameters(int* index, enum Sha *sha, char *filename, int argc, char
 
 static const char *sha_to_string(enum Sha sha);
 
+void print_help(const char *prog);
+
 int main (int argc, char **argv) {
 
     /* Default hash output size and input filename */
@@ -93,6 +95,40 @@ int main (int argc, char **argv) {
     return 0;
 }
 
+#include <stdio.h>
+
+void print_help(const char *prog) {
+    printf("\n\tUsage:\n");
+    printf("\t  %s <path/to/file> [OPTIONS]\n", prog);
+    printf("\t  cat <path/to/file> | %s [OPTIONS]\n", prog);
+    printf("\t  echo -n \"\" | %s\n\n", prog);
+
+    printf("\tDescription:\n");
+    printf("\t  Computes SHA-1, SHA-2, and SHA-3 hashes of input data.\n");
+    printf("\t  Input can be provided via file or standard input (stdin).\n\n");
+
+    printf("\tOptions:\n");
+    printf("\t  -224        Use SHA-224\n");
+    printf("\t  -256        Use SHA-256 (default)\n");
+    printf("\t  -384        Use SHA-384\n");
+    printf("\t  -512        Use SHA-512\n");
+    printf("\t  -512/224    Use SHA-512/224\n");
+    printf("\t  -512/256    Use SHA-512/256\n");
+    printf("\t  -3_224      Use SHA3-224\n");
+    printf("\t  -3_256      Use SHA3-256\n");
+    printf("\t  -3_384      Use SHA3-384\n");
+    printf("\t  -3_512      Use SHA3-512\n\n");
+
+    printf("\tExamples:\n");
+    printf("\t  %s file.txt -256\n", prog);
+    printf("\t  %s file.txt -3_512\n", prog);
+    printf("\t  cat file.txt | %s -512\n\n", prog);
+
+    printf("\tNotes:\n");
+    printf("\t  - If no file is provided, input is read from stdin.\n");
+    printf("\t  - If no option is specified, SHA-256 is used by default.\n\n");
+}
+
 static const char *sha_to_string(enum Sha sha) {
     switch (sha) {
         case SHA_1:       return "SHA-1:       ";
@@ -121,7 +157,7 @@ static void parameters(int* index, enum Sha *sha, char *filename, int argc, char
     if (argc > *index) {
 
         if (strcmp(argv[*index], "-h") == 0 || strcmp(argv[*index], "--help") == 0) {
-            fprintf(stderr, "Usage: \n\t%s <path/to/file> [-224|-256|-384|-512]\n\tcat <path/to/file> | %s [-224|-256|-384|-512]\n\techo -n \"\" | %s\n", argv[0], argv[0], argv[0]);
+            print_help(argv[0]);
             exit(1);
         } else if (strcmp(argv[*index], "-256") == 0) {
             *sha = SHA_256;
@@ -145,6 +181,9 @@ static void parameters(int* index, enum Sha *sha, char *filename, int argc, char
             *sha = SHA_3_512;
         } else if (strcmp(argv[*index], "-1") == 0) {
             *sha = SHA_1;
+        } else if (argv[*index][0] == '-') {
+            print_help(argv[0]);
+            exit(1);
         } else {
             /* Copy argument to filename buffer (truncate if too long) */
             strncpy(filename, argv[*index], 255);
